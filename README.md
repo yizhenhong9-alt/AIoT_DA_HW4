@@ -2,11 +2,22 @@
 
 > **「我告訴你，這就是事實的真相！」** —— 讓王世堅立委為您生活中的大小事進行超譯，並對時事新聞進行國會級質詢。
 
+## 📸 應用程式展示 (Demo)
+
+| 介面功能 | 圖表引用 |
+| :--- | :--- |
+| **圖 1：民生抱怨專區** | 請見專案截圖 **(圖 1)**：展示使用者輸入、LLM 結構化情緒分析結果，以及生成的貼文。 |
+| **圖 2：時事質詢專區** | 請見專案截圖 **(圖 2)**：展示貼上新聞 URL 或文字後的爬蟲讀取狀態、數據分析結果，以及最終的國會質詢評論。 |
+
+-----
+
 ## 📖 專案簡介
 
-這是一個結合 **生成式 AI (GenAI)**、**情感分析 (Sentiment Analysis)** 與 **網頁爬蟲 (Web Scraping)** 的全方位 Streamlit 應用程式。
+本專案係基於 [yenlung/AI-Demo](https://github.com/yenlung/AI-Demo) 中的 **【Demo04】用 OpenAI\_API 打造員瑛式思考生成器.ipynb** 實作範例進行**深度學習專題實作與功能延伸**。
 
-本專案模擬了台灣知名立委王世堅的獨特問政風格。它不僅能處理使用者的日常抱怨，還能直接讀取新聞連結，將內容拔高到「國安危機」等級進行犀利批判。透過整合 **SnowNLP**，系統能偵測文字背後的「民怨指數」，並據此調整委員的憤怒值與開罵力道。
+本專案開發了一款名為「王世堅式思考生成器」的互動式 AI 應用程式，旨在利用生成式 AI 技術模擬台灣知名立委王世堅的獨特問政風格與批判思維。系統透過**向 LLM 發出結構化分析請求**，偵測文本背後的**核心情緒（例如：憤怒、質疑）**，並據此動態調整委員的憤怒值與開罵力道。
+
+本專案模擬了台灣知名立委王世堅的獨特問政風格。它不僅能處理使用者的日常抱怨，還能直接讀取新聞連結，將內容拔高到「國安危機」等級進行犀利批判。
 
 ## ✨ 核心功能
 
@@ -17,13 +28,13 @@
       * **支援網址讀取**：直接貼上新聞 URL，系統自動爬取標題與內文。
       * **國會質詢模式**：針對新聞事件進行嚴肅且犀利的政治評論。
 
-### 2\. 📊 國會大數據 (情感分析)
+### 2\. 📊 國會大數據 (結構化情緒分析)
 
-  * 使用 `SnowNLP` 分析輸入內容的情緒正負向。
-  * 將數據轉化為 **「🔥 民意憤怒指數」** 或 **「💣 社會爭議指數」**。
+  * **專業分析**：使用 LLM 輸出 **JSON 格式** 進行分析，判斷文本的**核心情緒**（如憤怒、質疑、失望）及**強度指數**。
+  * **數據展現**：在介面顯示 **核心情緒** 與 **強度指數**。
   * **動態 Prompt**：
-      * **民怨沸騰 (指數 \> 80%)**：委員火力全開，讚賞你的憤怒。
-      * **死氣沉沉 (指數 \< 20%)**：委員痛批這是粉飾太平，要求你醒醒。
+      * **趨向憤怒/失望**：委員火力全開，將其升級為政治弊案。
+      * **趨向輕視/質疑**：委員以嚴謹的態度進行質詢，並提出尖銳的、邏輯層面的疑問。
 
 ### 3\. 😈 經典重現與禮物機制
 
@@ -35,8 +46,8 @@
 ```text
 shih-chien-llm-app/
 ├── .env                  # 存放 API Key 的環境變數檔 (請勿上傳至 GitHub)
-├── llm_client.py         # 處理 AISuite 與 LLM 溝通的邏輯
-├── streamlit_app.py      # 主程式：包含介面、爬蟲、情感分析邏輯
+├── llm_client.py         # 處理 AISuite 與 LLM 溝通的邏輯（含 JSON 分析）
+├── streamlit_app.py      # 主程式：包含介面、爬蟲、情緒分析結果展示邏輯
 ├── requirements.txt      # 專案依賴套件列表
 └── README.md             # 專案說明文件
 ```
@@ -60,10 +71,11 @@ source venv/bin/activate
 
 ### 2\. 安裝依賴套件
 
-本專案集成了多個強大套件，請執行以下指令安裝：
+本專案集成了多個強大套件。
 
 ```bash
-pip install aisuite[groq] streamlit python-dotenv snownlp requests beautifulsoup4
+# 核心 LLM、Streamlit、爬蟲工具
+pip install aisuite[groq] streamlit python-dotenv requests beautifulsoup4
 ```
 
 ### 3\. 設定 API 金鑰
@@ -90,8 +102,6 @@ streamlit run streamlit_app.py
 
 瀏覽器將自動開啟應用程式（預設 `http://localhost:8501`）。
 
-Streamlit.app: https://aiotdahw4-7114056010.streamlit.app/
-
 ## 📝 使用指南
 
 ### 情境 A：生活不如意
@@ -99,7 +109,7 @@ Streamlit.app: https://aiotdahw4-7114056010.streamlit.app/
 1.  點選 **「😤 我要抱怨」** 分頁。
 2.  輸入：「今天下大雨忘了帶傘，全身濕透。」
 3.  按下 **「🔥 世堅委員，請開罵！」**。
-4.  查看委員如何將其連結到「城市基礎建設的失敗」並領取您的禮物。
+4.  查看\*\*「核心情緒」\*\*分析結果，並閱讀委員如何將其連結到「城市基礎建設的失敗」並領取您的禮物。
 
 ### 情境 B：看到不爽的新聞
 
@@ -110,9 +120,10 @@ Streamlit.app: https://aiotdahw4-7114056010.streamlit.app/
 
 ## 💡 技術棧
 
+  * **專案起源**: [yenlung/AI-Demo](https://github.com/yenlung/AI-Demo)
   * **Frontend**: [Streamlit](https://streamlit.io/)
   * **LLM Engine**: [AISuite](https://github.com/andrewyng/aisuite) & [Groq](https://groq.com/)
-  * **Data Analysis**: [SnowNLP](https://github.com/isnowfy/snownlp) (Sentiment Analysis)
+  * **Core Analysis**: LLM-driven Structured JSON Analysis (取代 SnowNLP)
   * **Web Crawler**: `requests` + `BeautifulSoup4`
   * **Language**: Python
 
