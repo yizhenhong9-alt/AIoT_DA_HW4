@@ -1,10 +1,9 @@
-# streamlit_app.py
 import streamlit as st
 import random
-import requests # 新增：用於發送網絡請求
-from bs4 import BeautifulSoup # 新增：用於解析網頁 HTML
-from llm_client import reply 
-from snownlp import SnowNLP 
+import requests
+from bs4 import BeautifulSoup
+from llm_client import reply, analyze_emotion_via_llm # <-- 關鍵修改：導入新的函式
+import json # 雖然在 llm_client 裡使用，但這裡也確保有導入以防萬一
 
 # --- 1. 定義王世堅立委的經典語錄 ---
 CLASSIC_QUOTES = [
@@ -54,51 +53,53 @@ LLM_MODEL = "llama-3.3-70b-versatile"
 
 # --- 4. 輔助函式區 ---
 
-# (A) 情感分析函式
-def analyze_sentiment_and_adjust_prompt(user_text, base_system_prompt):
-    # 為了避免過長的網頁內容影響情感分析速度，我們只取前 1000 字進行分析
-    short_text = user_text[:1000]
-    s = SnowNLP(short_text)
-    sentiment_score = s.sentiments 
-    anger_level = int((1 - sentiment_score) * 100)
+# (A) 情緒分析函式 (大幅修改，改為呼叫 LLM_CLIENT 的 JSON 分析)
+def analyze_emotion_and_adjust_prompt(user_text, base_system_prompt):
+    
+    # 呼叫 LLM 進行情緒分析
+    emotion_data = analyze_emotion_via_llm(user_text, provider=LLM_PROVIDER, model=LLM_MODEL)
+    
+    # 錯誤處理
+    if "error" in emotion_data:
+        return base_system_prompt + f"\n[系統提示：情緒分析失敗，請使用一般語氣。錯誤: {emotion_data['error']}]", "分析失敗", 0
+
+    dominant_emotion = emotion_data.get("dominant_emotion", "質疑")
+    intensity_score = emotion_data.get("intensity_score", 50)
     
     sentiment_inject = ""
-    if anger_level > 80:
-        sentiment_inject = f"\n[系統提示：偵測到內容極度負面/令人憤怒 (指數 {anger_level}%)！請你火力全開，用最激動的語氣痛批這件事！]"
-    elif anger_level < 20:
-        sentiment_inject = f"\n[系統提示：偵測到內容過於平淡或是正面 (指數 {anger_level}%)！請你指出這背後的虛偽，或痛罵這種粉飾太平的心態！]"
+    # 根據 JSON 輸出的核心情緒和強度來調整 Prompt
+    if "憤怒" in dominant_emotion or "失望" in dominant_emotion and intensity_score > 80:
+        sentiment_inject = f"\n[系統提示：偵測到內容核心情緒為【{dominant_emotion}】(強度 {intensity_score}%)！請你火力全開，用最激動的語氣痛批這件事，並將其升級為政治弊案！]"
+    elif "輕視" in dominant_emotion or "質疑" in dominant_emotion:
+        sentiment_inject = f"\n[系統提示：內容情緒為【{dominant_emotion}】(強度 {intensity_score}%)！請你以嚴謹的態度進行質詢，並提出尖銳的、邏輯層面的疑問！]"
+    elif "中立" in dominant_emotion or "平靜" in dominant_emotion and intensity_score < 30:
+        sentiment_inject = f"\n[系統提示：偵測到內容過於平靜/中立 ({intensity_score}%)！請你指出這背後的虛偽，或痛罵這種粉飾太平的心態！]"
     else:
-        sentiment_inject = f"\n[系統提示：憤怒/負面指數為 {anger_level}%，請維持正常發揮。]"
-        
-    return base_system_prompt + sentiment_inject, anger_level
+        sentiment_inject = f"\n[系統提示：偵測到核心情緒為【{dominant_emotion}】(強度 {intensity_score}%)，請維持正常犀利發揮。]"
 
-# (B) 網頁抓取函式 (新增功能)
+    return base_system_prompt + sentiment_inject, dominant_emotion, intensity_score
+
+# (B) 網頁抓取函式 (不變)
 def fetch_news_content(url):
     try:
-        # 偽裝成瀏覽器，避免被擋
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status() # 檢查請求是否成功
+        response.raise_for_status() 
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 嘗試抓取標題
         title = soup.title.string if soup.title else "無標題新聞"
-        
-        # 抓取所有段落 <p> 的文字
         paragraphs = soup.find_all('p')
         content = "\n".join([p.get_text().strip() for p in paragraphs])
         
-        # 簡單過濾太短的雜訊
         if len(content) < 50:
             return f"錯誤：網頁內容過短，無法解析。請直接複製文字貼上。\n(標題: {title})"
             
-        return f"【新聞標題】：{title}\n\n【新聞內文】：\n{content[:3000]}" # 限制長度以免爆 token
+        return f"【新聞標題】：{title}\n\n【新聞內文】：\n{content[:3000]}"
         
     except Exception as e:
         return f"讀取網址失敗：{str(e)}。\n建議您直接複製新聞內文貼上。"
 
-# --- 5. Streamlit 介面配置 ---
+# --- 5. Streamlit 介面配置與邏輯 ---
 st.set_page_config(
     page_title="😈 王世堅式思考生成器 💣",
     layout="wide"
@@ -108,10 +109,65 @@ st.title("😈 王世堅式思考生成器 💣")
 st.markdown("---")
 st.markdown("### 「我告訴你，這就是事實的真相！」")
 
-# --- 建立分頁 Tabs ---
 tab1, tab2 = st.tabs(["😤 我要抱怨 (民生)", "📰 貼新聞/連結 (時事)"])
 
-# === Tab 1: 民生抱怨 ===
+# === Tab 1 & Tab 2 邏輯合併處理 ===
+
+def run_analysis_and_reply(user_input, is_news_mode):
+    # --- 1. 執行情緒分析 (需要先執行) ---
+    with st.spinner('委員正在調閱資料，進行情緒分析...'):
+        # 這裡會執行對 LLM 的第一次呼叫 (JSON 分析)
+        adjusted_prompt, dominant_emotion, intensity_score = analyze_emotion_and_adjust_prompt(
+            user_input, 
+            BASE_SHIH_CHIEN_PROMPT
+        )
+        
+    # 顯示數據
+    st.subheader("📊 委員的數據分析室")
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        st.metric(label="核心情緒", value=f"{dominant_emotion}")
+        st.metric(label="強度指數", value=f"{intensity_score}%")
+    with col2:
+        # 根據情緒給予評語
+        if "憤怒" in dominant_emotion or "失望" in dominant_emotion:
+            st.warning(f"⚠️ 警報：情緒趨向【{dominant_emotion}】！已達高層關注等級！")
+        elif "輕視" in dominant_emotion or "質疑" in dominant_emotion:
+            st.info(f"🧐 狀態：情緒趨向【{dominant_emotion}】，需要理性且尖銳的質詢！")
+        else:
+            st.success(f"✅ 狀態：情緒趨向【{dominant_emotion}】，請指出這背後的弊端。")
+    st.progress(intensity_score)
+    st.markdown("---")
+
+    # --- 2. 執行貼文生成 (主呼叫) ---
+    with st.spinner('委員正在撰寫犀利貼文與質詢稿...'):
+        if is_news_mode:
+             final_prompt = f"請針對以下這則【新聞報導/時事】進行王世堅式的犀利評論與質詢：\n\n{user_input}"
+        else:
+             final_prompt = user_input
+             
+        response = reply(
+            system=adjusted_prompt, 
+            prompt=final_prompt,
+            provider=LLM_PROVIDER,
+            model=LLM_MODEL
+        )
+
+    # 3. 顯示結果
+    st.subheader("📣 王世堅式貼文/國會質詢")
+    style_div = """
+    <div style="border: 2px solid #E63946; padding: 15px; border-radius: 10px; background-color: #FFF1F1;">
+        <p style="font-size: 1.1em; white-space: pre-wrap;">{response}</p>
+    </div>
+    """ if not is_news_mode else """
+    <div style="border: 2px solid #1d3557; padding: 15px; border-radius: 10px; background-color: #f1faee;">
+        <p style="font-size: 1.1em; white-space: pre-wrap; color: #1d3557;">{response}</p>
+    </div>
+    """
+    st.markdown(style_div.format(response=response), unsafe_allow_html=True)
+
+
+# --- Tab 1: 民生抱怨 邏輯 ---
 with tab1:
     st.markdown("請輸入一件你覺得是小事或抱怨的事，讓王世堅立委為你超譯！")
     user_input_complaint = st.text_area(
@@ -120,48 +176,13 @@ with tab1:
         height=150,
         key="complaint_input"
     )
-
     if st.button("🔥 世堅委員，請開罵！", type="primary", key="btn_complaint"):
-        if not user_input_complaint:
-            st.error("❌ 請輸入內容！")
+        if user_input_complaint:
+            run_analysis_and_reply(user_input_complaint, is_news_mode=False)
         else:
-            with st.spinner('委員正在檢視民生數據...'):
-                adjusted_prompt, anger_score = analyze_sentiment_and_adjust_prompt(
-                    user_input_complaint, 
-                    BASE_SHIH_CHIEN_PROMPT
-                )
-                response = reply(
-                    system=adjusted_prompt, 
-                    prompt=user_input_complaint,
-                    provider=LLM_PROVIDER,
-                    model=LLM_MODEL
-                )
-                
-            st.subheader("📊 委員的數據分析室")
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                st.metric(label="🔥 民意憤怒指數", value=f"{anger_score}%")
-            with col2:
-                if anger_score > 80:
-                    st.warning("⚠️ 警報：民怨沸騰！已達國安危機等級！")
-                elif anger_score < 20:
-                    st.info("💤 狀態：死氣沉沉，需要強力電擊！")
-                else:
-                    st.success("✅ 狀態：一般民怨，尚可控制。")
-            st.progress(anger_score)
-            st.markdown("---")
-                
-            st.subheader("📣 王世堅式貼文")
-            st.markdown(
-                f"""
-                <div style="border: 2px solid #E63946; padding: 15px; border-radius: 10px; background-color: #FFF1F1;">
-                    <p style="font-size: 1.1em; white-space: pre-wrap;">{response}</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            st.error("❌ 請輸入內容！")
 
-# === Tab 2: 新聞針砭 (支援連結) ===
+# === Tab 2: 新聞針砭 邏輯 ---
 with tab2:
     st.markdown("請貼上 **新聞連結 (URL)** 或直接貼上 **新聞文字**，讓王世堅立委進行國會級質詢！")
     user_input_news = st.text_area(
@@ -176,61 +197,22 @@ with tab2:
             st.error("❌ 請貼上內容！")
         else:
             news_content = ""
-            
-            # --- 判斷是否為網址 ---
             user_input_news = user_input_news.strip()
+            
+            # --- 判斷是否為網址，並進行爬蟲 ---
             if user_input_news.startswith("http://") or user_input_news.startswith("https://"):
                 with st.spinner(f'委員正在閱讀網頁資料：{user_input_news} ...'):
                     news_content = fetch_news_content(user_input_news)
                     
-                    # 如果抓取失敗，會回傳包含 "失敗" 或 "錯誤" 的字串，稍微檢查一下
                     if "讀取網址失敗" in news_content or "錯誤：" in news_content:
                         st.error(news_content)
-                        st.stop() # 停止後續執行
+                        st.stop()
                     else:
-                        st.success("✅ 網頁讀取成功！委員正在準備質詢稿...")
-                        with st.expander("查看讀取到的新聞內容"): # 讓使用者可以折疊查看抓到了什麼
+                        st.success("✅ 網頁讀取成功！")
+                        with st.expander("查看讀取到的新聞內容"): 
                             st.text(news_content[:500] + "...")
             else:
-                # 不是網址，視為純文字
                 news_content = user_input_news
 
-            # --- 開始生成 ---
-            with st.spinner('委員正在審閱預算與新聞資料...'):
-                adjusted_prompt, anger_score = analyze_sentiment_and_adjust_prompt(
-                    news_content, 
-                    BASE_SHIH_CHIEN_PROMPT
-                )
-                
-                news_prompt_wrapper = f"請針對以下這則【新聞報導/時事】進行王世堅式的犀利評論與質詢：\n\n{news_content}"
-
-                response = reply(
-                    system=adjusted_prompt, 
-                    prompt=news_prompt_wrapper,
-                    provider=LLM_PROVIDER,
-                    model=LLM_MODEL
-                )
-                
-            st.subheader("📊 國會辦公室大數據")
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                st.metric(label="💣 社會爭議/負面指數", value=f"{anger_score}%")
-            with col2:
-                if anger_score > 80:
-                    st.error("🔥 結論：這簡直是動搖國本！")
-                elif anger_score < 20:
-                    st.info("😒 結論：又是粉飾太平的大內宣！")
-                else:
-                    st.warning("⚠️ 結論：魔鬼藏在細節裡！")
-            st.progress(anger_score)
-            st.markdown("---")
-                
-            st.subheader("📣 國會質詢/時事評論")
-            st.markdown(
-                f"""
-                <div style="border: 2px solid #1d3557; padding: 15px; border-radius: 10px; background-color: #f1faee;">
-                    <p style="font-size: 1.1em; white-space: pre-wrap; color: #1d3557;">{response}</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            # --- 開始運行分析與生成 ---
+            run_analysis_and_reply(news_content, is_news_mode=True)
